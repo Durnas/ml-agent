@@ -1,0 +1,53 @@
+@startuml sequence
+title Diagram sekwencji — uruchomienie treningu ML przez agenta ("CI/CD dla naukowców danych")
+
+actor "Naukowiec danych" as DS
+participant "Dashboard\n(Streamlit)" as UI
+participant "Agent LLM\n(Groq)" as LLM
+participant "Kubernetes API" as K8s
+
+DS -> UI ++ : otwiera klaster i namespace
+DS -> UI : "uruchom trening z <repo>"
+UI -> LLM ++ : wiadomość + lista narzędzi
+LLM --> UI -- : wywołanie create_training_job(repo)
+UI --> DS : żądanie potwierdzenia akcji
+
+alt użytkownik odrzuca
+  DS -> UI : Odrzuć
+  UI -> LLM : "użytkownik odrzucił"
+  LLM --> UI : odpowiedź tekstowa
+  UI --> DS : wyświetla odpowiedź
+else użytkownik zatwierdza
+  DS -> UI : Zatwierdź
+  UI -> K8s ++ : create Job\n(nvidia.com/gpu: 1)
+  K8s --> UI : Job utworzony
+
+  group wewnątrz klastra
+    K8s -> K8s : scheduler przydziela GPU,\nkubelet uruchamia Pod
+    K8s -> K8s : init container: git clone repozytorium
+    K8s -> K8s : pip install -r requirements.txt
+    K8s -> K8s : python train.py (GPU)
+  end
+
+  alt trening zakończony sukcesem
+    K8s --> UI : status: Succeeded
+  else trening nieudany
+    K8s --> UI -- : status: Failed / CrashLoopBackOff
+  end
+
+  DS -> UI : "jaki status zadania?"
+  UI -> K8s ++ : get_job_status / get_job_logs
+  K8s --> UI -- : status + logi
+  UI --> DS : prezentuje wynik w czacie
+
+  opt wynik niesatysfakcjonujący
+    DS -> UI : "opisz błąd"
+    UI -> K8s ++ : describe_pod / get_recent_events
+    K8s --> UI -- : diagnostyka
+    UI --> DS : wyjaśnienie przyczyny
+    DS -> DS : poprawia kod, git push
+    note over DS, K8s : powrót do żądania treningu
+  end
+end
+
+@enduml
