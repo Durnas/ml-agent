@@ -1,0 +1,62 @@
+@startuml deployment
+title Diagram wdrożenia — Agent do zarządzania Kubernetesem (stan docelowy)
+
+node "Stacja robocza / serwer aplikacji" as workstation {
+  artifact "Przeglądarka WWW" as browser
+  artifact "Dashboard Streamlit\n(app.py)" as streamlit
+  artifact "Rdzeń agenta\n(agent_core.py)" as agentcore
+  artifact "Plik kubeconfig" as kubeconfig
+}
+
+cloud "Groq Cloud" {
+  node "Groq API" as groq {
+    artifact "LLM (openai/gpt-oss-120b)\nfunction calling" as llm
+  }
+}
+
+cloud "GitHub" {
+  node "Repozytoria treningowe" as github {
+    artifact "train.py\nrequirements.txt" as trainrepo
+  }
+}
+
+node "Rejestr obrazów kontenerów" as registry {
+  artifact "Universal Training Image" as image
+}
+
+node "Klaster Kubernetes" as k8scluster {
+  node "Control Plane" as cp {
+    artifact "kube-apiserver" as apiserver
+    artifact "etcd / dqlite" as etcd
+    artifact "scheduler" as scheduler
+    artifact "controller-manager" as ctrlmgr
+  }
+  node "Węzeł roboczy (CPU)" as workerCPU {
+    artifact "kubelet" as kubeletCPU
+    artifact "Pody (Deployment/Service/...)" as podsCPU
+  }
+  node "Węzeł roboczy (GPU)" as workerGPU {
+    artifact "kubelet" as kubeletGPU
+    artifact "NVIDIA Device Plugin" as devplugin
+    artifact "Pod treningowy (Job)" as trainpod
+  }
+}
+
+browser --> streamlit : HTTP (localhost)
+streamlit --> agentcore : wywołania funkcji
+agentcore --> llm : HTTPS (chat completions)
+agentcore --> apiserver : HTTPS (Kubernetes API,\nautoryzacja przez kubeconfig)
+kubeconfig ..> agentcore
+
+apiserver --> scheduler
+apiserver --> etcd
+apiserver --> ctrlmgr
+scheduler --> workerGPU : przydział Poda\n(wymaga nvidia.com/gpu)
+scheduler --> workerCPU : przydział Poda
+
+trainpod --> github : git clone (HTTPS)\n[init container]
+workerGPU --> registry : docker pull\n(Universal Training Image)
+workerCPU --> registry : docker pull
+devplugin --> trainpod : przydział GPU
+
+@enduml

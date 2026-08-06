@@ -1,0 +1,56 @@
+@startuml activity
+title Diagram aktywności — uruchomienie treningu ML przez agenta ("CI/CD dla naukowców danych")
+
+|Naukowiec danych|
+start
+:Napisz train.py i requirements.txt;
+:Wypchnij kod do repozytorium GitHub;
+:Otwórz dashboard, wybierz klaster i namespace;
+:Poproś agenta o trening (link do repo w czacie);
+
+|Agent (Streamlit + LLM)|
+:LLM interpretuje intencję;
+:Wybiera narzędzie create_training_job;
+:Wyświetla żądanie potwierdzenia\n(akcja kosztowna/destrukcyjna);
+
+|Naukowiec danych|
+if (Zatwierdza akcję?) then (nie)
+  |Agent (Streamlit + LLM)|
+  :Informuje model, że użytkownik odrzucił;
+  stop
+else (tak)
+endif
+
+|Agent (Streamlit + LLM)|
+:Wywołuje Kubernetes API\n(tworzy obiekt Job,\nresources.limits: nvidia.com/gpu=1);
+
+|Klaster Kubernetes|
+:Scheduler przydziela Pod\ndo węzła z wolnym GPU;
+:Init container klonuje repozytorium z GitHub;
+:Instaluje requirements.txt (jeśli istnieje);
+:Uruchamia train.py z dostępem do GPU;
+
+if (Trening zakończony sukcesem?) then (tak)
+  :Status Poda: Succeeded;
+else (nie)
+  :Status Poda: Failed / CrashLoopBackOff;
+endif
+
+|Naukowiec danych|
+:Pyta agenta o status i logi\n(get_job_status, get_job_logs);
+
+|Agent (Streamlit + LLM)|
+:Pobiera dane z Kubernetes API;
+:Prezentuje wynik w czacie;
+
+|Naukowiec danych|
+if (Wynik satysfakcjonujący?) then (nie)
+  :Debuguje\n(describe_pod, get_recent_events\nprzez agenta);
+  :Poprawia kod;
+  backward:Wypchnij poprawiony kod do GitHub;
+else (tak)
+  :Pobiera wyniki / wytrenowany model;
+  stop
+endif
+
+@enduml
